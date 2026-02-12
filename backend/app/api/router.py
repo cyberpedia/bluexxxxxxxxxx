@@ -10,6 +10,7 @@ from app.security.mfa import generate_backup_codes, setup_totp, use_backup_code,
 from app.security.policy import enforce_password_policy
 from app.security.rbac import get_current_user, require_capability
 from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
+from fastapi import APIRouter
 
 api_router = APIRouter()
 
@@ -274,4 +275,6 @@ def get_team_audit(team_id: str, user=Depends(get_current_user)):
 
 @api_router.get('/status', tags=['system'])
 def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status() -> dict[str, str]:
     return {'service': 'cerberus', 'state': 'ready'}
