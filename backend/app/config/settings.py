@@ -1,3 +1,4 @@
+"""Application settings loaded from environment variables."""
 """Application settings loaded from environment variables.
 
 Secure-by-default:
@@ -27,6 +28,16 @@ class Settings(BaseSettings):
 
     jwt_secret: str = Field(default='CHANGE_ME_IN_ENV')
     jwt_algorithm: str = Field(default='HS256')
+    jwt_access_expiry_minutes: int = Field(default=15)
+    jwt_refresh_expiry_minutes: int = Field(default=60 * 24 * 7)
+
+    require_email_verification: bool = Field(default=True)
+    enable_team_creation: bool = Field(default=True)
+    max_team_size: int = Field(default=5)
+    team_roster_lock: bool = Field(default=False)
+
+    secure_cookies: bool = Field(default=False)
+    rate_limit_per_minute: int = Field(default=120)
     jwt_expiry_minutes: int = Field(default=30)
 
 

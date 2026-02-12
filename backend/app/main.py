@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 
+from app.api.middleware import IPControlMiddleware, JWTMiddleware, RateLimitMiddleware
 from app.api.router import api_router
 from app.config.settings import settings
 
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
+app.add_middleware(IPControlMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(JWTMiddleware)
 app.include_router(api_router, prefix=settings.api_prefix)
 
 

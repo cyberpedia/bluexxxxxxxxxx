@@ -1,4 +1,21 @@
 # Cerberus - Modular Security Platform
+
+## Backend features (Phase 3)
+
+- JWT auth with access + refresh cookies (`HttpOnly`, `SameSite=Strict`, configurable `Secure`).
+- User registration/login/logout, refresh, global logout.
+- Email verification toggle.
+- MFA with TOTP + backup codes.
+- Password policy enforcement.
+- Account states: active/suspended/banned/shadow.
+- RBAC capability checks.
+- API key lifecycle management.
+- IP blacklist/whitelist enforcement.
+- Rate limiting middleware.
+- Team management with captain/co-captain roles, invite approval, max size, roster lock.
+- Identity/team audit logging.
+
+## Run backend
 # Cerberus - Phase 1 Project Skeleton
 
 Cerberus is organized as a modular security platform with clear separation between backend services, frontend UI, and operational artifacts.
