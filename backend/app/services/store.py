@@ -8,6 +8,13 @@ import uuid
 
 from app.security.passwords import hash_password, verify_password
 from app.services.challenge_engine import ChallengeRecord, HintRule, SolveRecord
+from datetime import datetime
+from enum import Enum
+import hashlib
+import secrets
+import uuid
+
+from app.security.passwords import hash_password, verify_password
 
 
 class AccountState(str, Enum):
@@ -40,6 +47,7 @@ class SessionRecord:
     ip: str
     user_agent: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=datetime.utcnow)
     revoked: bool = False
 
 
@@ -50,6 +58,7 @@ class TeamRecord:
     name: str
     captain_id: str
     members: dict[str, str] = field(default_factory=dict)
+    members: dict[str, str] = field(default_factory=dict)  # user_id -> role
     invite_approvals_required: bool = True
     roster_locked: bool = False
 
@@ -87,6 +96,7 @@ class InMemoryStore:
                 'action': action,
                 'details': details,
                 'created_at': datetime.now(timezone.utc).isoformat(),
+                'created_at': datetime.utcnow().isoformat(),
             }
         )
 
@@ -106,6 +116,20 @@ class InMemoryStore:
             self.user_by_username[user.username] = uid
             self.audit(uid, 'identity.user_registered', {'email': user.email})
             return user
+        uid = str(uuid.uuid4())
+        verify_code = secrets.token_urlsafe(24)
+        user = UserRecord(
+            id=uid,
+            email=email.lower(),
+            username=username,
+            password_hash=hash_password(password),
+            email_verify_code=verify_code,
+        )
+        self.users[uid] = user
+        self.user_by_email[user.email] = uid
+        self.user_by_username[user.username] = uid
+        self.audit(uid, 'identity.user_registered', {'email': user.email})
+        return user
 
     def find_user_by_email(self, email: str) -> UserRecord | None:
         uid = self.user_by_email.get(email.lower())

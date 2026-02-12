@@ -4,6 +4,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field, constr
+import secrets
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, EmailStr
 
 from app.config.settings import settings
 from app.security.jwt import create_access_token, create_refresh_token, decode_token
@@ -21,6 +26,8 @@ from app.services.challenge_engine import (
     validate_flag,
 )
 from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
+from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
+from fastapi import APIRouter
 
 api_router = APIRouter()
 
@@ -28,6 +35,7 @@ api_router = APIRouter()
 class RegisterIn(BaseModel):
     email: EmailStr
     username: constr(min_length=3, max_length=64)
+    username: str
     password: str
 
 
@@ -46,6 +54,8 @@ class EmailVerifyIn(BaseModel):
 class TeamCreateIn(BaseModel):
     event_id: constr(min_length=1, max_length=100)
     name: constr(min_length=2, max_length=120)
+    event_id: str
+    name: str
     invite_approval: bool = True
 
 
@@ -568,4 +578,8 @@ def challenge_analytics(challenge_id: str, user=Depends(get_current_user)):
 
 @api_router.get('/status', tags=['system'])
 def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status() -> dict[str, str]:
     return {'service': 'cerberus', 'state': 'ready'}
