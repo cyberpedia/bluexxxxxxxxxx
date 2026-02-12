@@ -1,4 +1,13 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+import hashlib
+import secrets
+import threading
+import uuid
+
+from app.security.passwords import hash_password, verify_password
+from app.services.challenge_engine import ChallengeRecord, HintRule, SolveRecord
 from datetime import datetime
 from enum import Enum
 import hashlib
@@ -37,6 +46,7 @@ class SessionRecord:
     refresh_token_hash: str
     ip: str
     user_agent: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = field(default_factory=datetime.utcnow)
     revoked: bool = False
 
@@ -47,6 +57,7 @@ class TeamRecord:
     event_id: str
     name: str
     captain_id: str
+    members: dict[str, str] = field(default_factory=dict)
     members: dict[str, str] = field(default_factory=dict)  # user_id -> role
     invite_approvals_required: bool = True
     roster_locked: bool = False
@@ -62,6 +73,7 @@ class APIKeyRecord:
 
 class InMemoryStore:
     def __init__(self) -> None:
+        self.lock = threading.RLock()
         self.users: dict[str, UserRecord] = {}
         self.user_by_email: dict[str, str] = {}
         self.user_by_username: dict[str, str] = {}
@@ -72,6 +84,9 @@ class InMemoryStore:
         self.ip_whitelist: set[str] = set()
         self.ip_blacklist: set[str] = set()
         self.rate_limit: dict[str, list[float]] = {}
+        self.challenges: dict[str, ChallengeRecord] = {}
+        self.hints: dict[str, HintRule] = {}
+        self.solves: dict[str, SolveRecord] = {}
 
     def audit(self, actor_user_id: str | None, action: str, details: dict) -> None:
         self.audit_logs.append(
@@ -80,11 +95,27 @@ class InMemoryStore:
                 'actor_user_id': actor_user_id,
                 'action': action,
                 'details': details,
+                'created_at': datetime.now(timezone.utc).isoformat(),
                 'created_at': datetime.utcnow().isoformat(),
             }
         )
 
     def register_user(self, email: str, username: str, password: str) -> UserRecord:
+        with self.lock:
+            uid = str(uuid.uuid4())
+            verify_code = secrets.token_urlsafe(24)
+            user = UserRecord(
+                id=uid,
+                email=email.lower(),
+                username=username,
+                password_hash=hash_password(password),
+                email_verify_code=verify_code,
+            )
+            self.users[uid] = user
+            self.user_by_email[user.email] = uid
+            self.user_by_username[user.username] = uid
+            self.audit(uid, 'identity.user_registered', {'email': user.email})
+            return user
         uid = str(uuid.uuid4())
         verify_code = secrets.token_urlsafe(24)
         user = UserRecord(
