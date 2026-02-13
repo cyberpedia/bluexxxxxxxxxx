@@ -100,3 +100,31 @@ def test_gamification_and_ws_feed() -> None:
     overlay = client.get('/api/v1/spectator/overlay')
     assert overlay.status_code == 200
     assert 'top' in overlay.json()
+
+
+def test_risk_dashboard_and_flagging() -> None:
+    reset_store()
+    reg_verify_login('riskadmin@example.com', 'riskadmin')
+    admin = store.find_user_by_email('riskadmin@example.com')
+    assert admin
+    admin.capabilities.update({'challenge:write', 'risk:read', 'risk:write'})
+
+    c = client.post('/api/v1/challenges', json={
+        'title': 'Risk', 'description': 'desc', 'category': 'misc', 'lifecycle': 'published',
+        'scoring_mode': 'static', 'base_points': 100, 'min_points': 50, 'first_blood_bonus': 0,
+    })
+    cid = c.json()['challenge_id']
+    client.post(f'/api/v1/challenges/{cid}/flags', json={'mode': 'exact', 'value': 'flag{risk}'})
+    for _ in range(14):
+        client.post(f'/api/v1/challenges/{cid}/submit', json={'submitted_flag': 'wrong'})
+
+    dash = client.get('/api/v1/risk/dashboard')
+    assert dash.status_code == 200
+    assert 'top_users' in dash.json()
+
+    flag = client.post(f"/api/v1/risk/flag/{admin.id}")
+    assert flag.status_code == 200
+
+    report = client.get('/api/v1/risk/reports/suspicious')
+    assert report.status_code == 200
+    assert 'flagged_users' in report.json()

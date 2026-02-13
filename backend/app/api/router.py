@@ -43,6 +43,7 @@ from app.services.leaderboard import (
     verify_integrity,
 )
 from app.services.realtime import connect, disconnect, fire_and_forget, publish_first_blood, publish_solve_event, recent_feed, record_solve_event
+from app.services.risk_engine import ip_cluster_findings, suspicious_report, team_risk, user_risk
 from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
 from fastapi import APIRouter
 
@@ -502,6 +503,7 @@ def get_hints(challenge_id: str, user=Depends(get_current_user)):
     solves = len([s for s in store.solves.values() if s.challenge_id == challenge_id and not s.revoked])
     now = datetime.now(timezone.utc)
     visible = []
+    req_ip = None
     for hint in store.hints.values():
         if hint.challenge_id != challenge_id or not hint.enabled:
             continue
@@ -512,10 +514,12 @@ def get_hints(challenge_id: str, user=Depends(get_current_user)):
             continue
         hint.usage_count += 1
         visible.append(hint)
+    store.record_risk_event('hint_view', user.id, req_ip, {'challenge_id': challenge_id, 'count': len(visible)})
     return {'hints': visible}
 
 
 @api_router.post('/challenges/{challenge_id}/submit')
+def submit_flag(challenge_id: str, payload: SubmitIn, request: Request, user=Depends(get_current_user)):
 def submit_flag(challenge_id: str, payload: SubmitIn, user=Depends(get_current_user)):
     challenge = store.challenges.get(challenge_id)
     if not challenge:
@@ -527,6 +531,8 @@ def submit_flag(challenge_id: str, payload: SubmitIn, user=Depends(get_current_u
         if solved.user_id == user.id and solved.challenge_id == challenge_id and not solved.revoked:
             return {'correct': True, 'already_solved': True, 'points': solved.awarded_points}
 
+    ip = request.client.host if request.client else None
+    store.record_risk_event('submission', user.id, ip, {'challenge_id': challenge_id})
     matched = any(validate_flag(rule, payload.submitted_flag) for rule in challenge.flags)
     if not matched:
         store.audit(user.id, 'challenge.submit_failed', {'challenge_id': challenge_id})
@@ -771,6 +777,53 @@ async def spectator_ws(websocket: WebSocket):
         await disconnect(websocket)
 
 
+
+
+# Anti-cheat & risk engine
+@api_router.get('/risk/user/{user_id}', dependencies=[Depends(require_capability('risk:read'))])
+def risk_user(user_id: str, admin=Depends(get_current_user)):
+    return user_risk(store, user_id)
+
+
+@api_router.get('/risk/team/{team_id}', dependencies=[Depends(require_capability('risk:read'))])
+def risk_team(team_id: str, admin=Depends(get_current_user)):
+    return team_risk(store, team_id)
+
+
+@api_router.get('/risk/dashboard', dependencies=[Depends(require_capability('risk:read'))])
+def risk_dashboard(admin=Depends(get_current_user)):
+    users = [user_risk(store, uid) for uid in store.users.keys()]
+    teams = [team_risk(store, tid) for tid in store.teams.keys()]
+    users.sort(key=lambda x: x['risk_score'], reverse=True)
+    teams.sort(key=lambda x: x['risk_score'], reverse=True)
+    return {'top_users': users[:20], 'top_teams': teams[:20], 'ip_clusters': ip_cluster_findings(store)}
+
+
+@api_router.post('/risk/flag/{user_id}', dependencies=[Depends(require_capability('risk:write'))])
+def risk_flag_user(user_id: str, admin=Depends(get_current_user)):
+    if user_id not in store.users:
+        raise HTTPException(status_code=404, detail='User not found')
+    store.review_flags.add(user_id)
+    store.audit(admin.id, 'risk.user_flagged', {'user_id': user_id})
+    return {'ok': True}
+
+
+@api_router.delete('/risk/flag/{user_id}', dependencies=[Depends(require_capability('risk:write'))])
+def risk_unflag_user(user_id: str, admin=Depends(get_current_user)):
+    store.review_flags.discard(user_id)
+    store.audit(admin.id, 'risk.user_unflagged', {'user_id': user_id})
+    return {'ok': True}
+
+
+@api_router.get('/risk/reports/suspicious', dependencies=[Depends(require_capability('risk:read'))])
+def risk_report(admin=Depends(get_current_user)):
+    report = suspicious_report(store)
+    store.audit(admin.id, 'risk.report_exported', {'flagged_users': len(report['flagged_users'])})
+    return report
+
+
+@api_router.get('/status', tags=['system'])
+def status_route() -> dict[str, str]:
 @api_router.get('/status', tags=['system'])
 def status_route() -> dict[str, str]:
 @api_router.get('/status', tags=['system'])

@@ -95,6 +95,8 @@ class InMemoryStore:
         self.score_adjustments: dict[str, object] = {}
         self.hidden_teams: set[str] = set()
         self.leaderboard_frozen: bool = False
+        self.risk_events: list[dict] = []
+        self.review_flags: set[str] = set()
 
     def audit(self, actor_user_id: str | None, action: str, details: dict) -> None:
         self.audit_logs.append(
@@ -152,6 +154,17 @@ class InMemoryStore:
     @staticmethod
     def digest(value: str) -> str:
         return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+    def record_risk_event(self, event_type: str, user_id: str | None, ip: str | None, details: dict | None = None) -> None:
+        self.risk_events.append(
+            {
+                'type': event_type,
+                'user_id': user_id,
+                'ip': ip,
+                'details': details or {},
+                'ts': datetime.now(timezone.utc),
+            }
+        )
 
 
 store = InMemoryStore()

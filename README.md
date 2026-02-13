@@ -1,5 +1,6 @@
 # Cerberus - Modular Security Platform
 
+## Backend features (Phase 6)
 ## Backend features (Phase 5)
 
 - Secure auth and RBAC with JWT, sessions, MFA, API keys, rate limiting, and IP allow/deny.
@@ -15,6 +16,10 @@
   - WebSocket live solve feed
   - First blood announcements
   - OBS/overlay endpoint and big-screen dashboard payload
+- Anti-cheat & risk engine:
+  - Detection: rapid submissions, IP-cluster solves, hint abuse, solve timing correlation, burst activity
+  - User/team risk scoring, admin risk dashboard, account flagging for review
+  - Suspicious activity report export
 
 ## Frontend features (Phase 5)
 
