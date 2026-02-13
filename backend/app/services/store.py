@@ -37,6 +37,11 @@ class UserRecord:
     force_password_reset: bool = False
     state: AccountState = AccountState.active
     capabilities: set[str] = field(default_factory=set)
+    xp: int = 0
+    streak_days: int = 0
+    trophies: list[str] = field(default_factory=list)
+    badges: set[str] = field(default_factory=set)
+    achievements: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -87,6 +92,9 @@ class InMemoryStore:
         self.challenges: dict[str, ChallengeRecord] = {}
         self.hints: dict[str, HintRule] = {}
         self.solves: dict[str, SolveRecord] = {}
+        self.score_adjustments: dict[str, object] = {}
+        self.hidden_teams: set[str] = set()
+        self.leaderboard_frozen: bool = False
 
     def audit(self, actor_user_id: str | None, action: str, details: dict) -> None:
         self.audit_logs.append(

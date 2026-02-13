@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 import secrets
 import uuid
 
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket
+from pydantic import BaseModel, EmailStr, Field, constr
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field, constr
 import secrets
@@ -26,6 +28,21 @@ from app.services.challenge_engine import (
     validate_flag,
 )
 from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
+from app.services.leaderboard import (
+    ScoreAdjustment,
+    build_category_board,
+    build_individual_board,
+    build_org_board,
+    build_team_board,
+    category_dominance,
+    export_csv_signed,
+    export_pdf_signed,
+    maybe_freeze,
+    score_progression,
+    solve_velocity,
+    verify_integrity,
+)
+from app.services.realtime import connect, disconnect, fire_and_forget, publish_first_blood, publish_solve_event, recent_feed, record_solve_event
 from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
 from fastapi import APIRouter
 
@@ -523,6 +540,13 @@ def submit_flag(challenge_id: str, payload: SubmitIn, user=Depends(get_current_u
     sid = str(uuid.uuid4())
     solve = SolveRecord(id=sid, user_id=user.id, challenge_id=challenge_id, awarded_points=points, solved_at=datetime.now(timezone.utc))
     store.solves[sid] = solve
+    first_blood = challenge_solves == 0
+    _update_gamification_for_solve(user, points, first_blood)
+    store.audit(user.id, 'challenge.solved', {'challenge_id': challenge_id, 'points': points, 'first_blood': first_blood})
+    record_solve_event(challenge_id, user.id, points, first_blood)
+    fire_and_forget(publish_solve_event(challenge_id, user.id, points))
+    if first_blood:
+        fire_and_forget(publish_first_blood(challenge_id, user.id))
     store.audit(user.id, 'challenge.solved', {'challenge_id': challenge_id, 'points': points})
     return {'correct': True, 'points': points}
 
@@ -576,6 +600,179 @@ def challenge_analytics(challenge_id: str, user=Depends(get_current_user)):
     return {'solve_count': solve_count, 'hint_usage_total': sum(hint_usage)}
 
 
+
+
+# Leaderboards & gamification
+class ScoreAdjustmentIn(BaseModel):
+    target_type: str
+    target_id: str
+    delta: int = Field(ge=-10000, le=10000)
+    reason: constr(min_length=3, max_length=500)
+
+
+@api_router.get('/leaderboards/{mode}')
+def get_leaderboard(mode: str, user=Depends(get_current_user)):
+    if mode == 'individual':
+        board = build_individual_board(store)
+    elif mode == 'teams':
+        board = build_team_board(store)
+    elif mode == 'categories':
+        board = build_category_board(store)
+    elif mode == 'orgs':
+        board = build_org_board(store)
+    else:
+        raise HTTPException(status_code=400, detail='Invalid mode')
+    return {'mode': mode, 'frozen': store.leaderboard_frozen, 'items': maybe_freeze(board, store)}
+
+
+@api_router.post('/leaderboards/freeze', dependencies=[Depends(require_capability('leaderboard:admin'))])
+def freeze(admin=Depends(get_current_user)):
+    store.leaderboard_frozen = True
+    store.audit(admin.id, 'leaderboard.freeze', {})
+    return {'ok': True}
+
+
+@api_router.post('/leaderboards/unfreeze', dependencies=[Depends(require_capability('leaderboard:admin'))])
+def unfreeze(admin=Depends(get_current_user)):
+    store.leaderboard_frozen = False
+    store.audit(admin.id, 'leaderboard.unfreeze', {})
+    return {'ok': True}
+
+
+@api_router.post('/leaderboards/adjust', dependencies=[Depends(require_capability('leaderboard:admin'))])
+def adjust_score(payload: ScoreAdjustmentIn, admin=Depends(get_current_user)):
+    if payload.target_type not in {'user', 'team', 'org'}:
+        raise HTTPException(status_code=400, detail='Invalid target_type')
+    aid = str(uuid.uuid4())
+    store.score_adjustments[aid] = ScoreAdjustment(
+        id=aid,
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        delta=payload.delta,
+        reason=payload.reason,
+        admin_user_id=admin.id,
+    )
+    store.audit(admin.id, 'leaderboard.manual_adjust', {'adjustment_id': aid, 'target': payload.target_id, 'delta': payload.delta})
+    return {'adjustment_id': aid}
+
+
+@api_router.post('/leaderboards/hide-team/{team_id}', dependencies=[Depends(require_capability('leaderboard:admin'))])
+def hide_team(team_id: str, admin=Depends(get_current_user)):
+    store.hidden_teams.add(team_id)
+    store.audit(admin.id, 'leaderboard.hide_team', {'team_id': team_id})
+    return {'ok': True}
+
+
+@api_router.post('/leaderboards/show-team/{team_id}', dependencies=[Depends(require_capability('leaderboard:admin'))])
+def show_team(team_id: str, admin=Depends(get_current_user)):
+    store.hidden_teams.discard(team_id)
+    store.audit(admin.id, 'leaderboard.show_team', {'team_id': team_id})
+    return {'ok': True}
+
+
+@api_router.get('/leaderboards/export/{fmt}')
+def export_board(fmt: str, mode: str = 'individual', user=Depends(get_current_user)):
+    if mode == 'individual':
+        rows = build_individual_board(store)
+    elif mode == 'teams':
+        rows = build_team_board(store)
+    elif mode == 'categories':
+        rows = build_category_board(store)
+    elif mode == 'orgs':
+        rows = build_org_board(store)
+    else:
+        raise HTTPException(status_code=400, detail='Invalid mode')
+
+    secret = settings.jwt_secret
+    if fmt == 'csv':
+        payload, signature = export_csv_signed(rows, secret)
+    elif fmt == 'pdf':
+        payload, signature = export_pdf_signed(rows, secret)
+    else:
+        raise HTTPException(status_code=400, detail='Invalid format')
+
+    store.audit(user.id, 'leaderboard.export', {'format': fmt, 'mode': mode})
+    return {'payload': payload, 'signature': signature}
+
+
+class IntegrityIn(BaseModel):
+    payload: str
+    signature: str
+
+
+@api_router.post('/leaderboards/integrity/verify')
+def integrity_verify(payload: IntegrityIn, user=Depends(get_current_user)):
+    ok = verify_integrity(payload.payload, payload.signature, settings.jwt_secret)
+    return {'valid': ok}
+
+
+@api_router.get('/leaderboards/analytics/progression/{user_id}')
+def analytics_progression(user_id: str, user=Depends(get_current_user)):
+    return {'points': score_progression(store, user_id)}
+
+
+@api_router.get('/leaderboards/analytics/solve-velocity')
+def analytics_velocity(user=Depends(get_current_user)):
+    return {'series': solve_velocity(store)}
+
+
+@api_router.get('/leaderboards/analytics/category-dominance')
+def analytics_category(user=Depends(get_current_user)):
+    return {'items': category_dominance(store)}
+
+
+@api_router.get('/gamification/me')
+def gamification_me(user=Depends(get_current_user)):
+    return {
+        'xp': user.xp,
+        'badges': sorted(user.badges),
+        'achievements': sorted(user.achievements),
+        'streak_days': user.streak_days,
+        'trophies': user.trophies,
+    }
+
+
+def _update_gamification_for_solve(user, points: int, first_blood: bool) -> None:
+    user.xp += max(points // 10, 5)
+    user.streak_days = max(1, user.streak_days)
+    if first_blood:
+        user.trophies.append('first-blood')
+    if user.xp >= 100 and 'xp-100' not in user.badges:
+        user.badges.add('xp-100')
+    if user.xp >= 500 and 'xp-500' not in user.badges:
+        user.badges.add('xp-500')
+    if user.xp >= 1000:
+        user.achievements.add('veteran')
+
+
+@api_router.get('/spectator/dashboard')
+def spectator_dashboard(limit: int = 20):
+    return {
+        'live_solves': recent_feed(limit),
+        'first_bloods': list(recent_feed(5)),
+        'overlay_url': '/api/v1/spectator/overlay',
+        'big_screen': {'theme': 'dark', 'refresh_s': 5},
+    }
+
+
+@api_router.get('/spectator/overlay')
+def spectator_overlay():
+    top = build_individual_board(store)[:5]
+    return {'top': top, 'live_feed': recent_feed(10)}
+
+
+@api_router.websocket('/ws/spectator')
+async def spectator_ws(websocket: WebSocket):
+    await connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:  # noqa: BLE001
+        await disconnect(websocket)
+
+
+@api_router.get('/status', tags=['system'])
+def status_route() -> dict[str, str]:
 @api_router.get('/status', tags=['system'])
 def status_route() -> dict[str, str]:
 @api_router.get('/status', tags=['system'])
