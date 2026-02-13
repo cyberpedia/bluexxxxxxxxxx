@@ -1,0 +1,38 @@
+[Unit]
+Description=Cerberus Service Instance (%i)
+Documentation=https://example.com/cerberus/docs
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=cerberus
+Group=cerberus
+WorkingDirectory=/opt/cerberus
+EnvironmentFile=-/opt/cerberus/config/%i.env
+ExecStart=/usr/bin/docker compose --project-name cerberus-%i --file /opt/cerberus/config/%i.compose.yml up --remove-orphans
+ExecStop=/usr/bin/docker compose --project-name cerberus-%i --file /opt/cerberus/config/%i.compose.yml down
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+
+# Permit writes only where required
+ReadWritePaths=/opt/cerberus /var/run/docker.sock
+
+[Install]
+WantedBy=multi-user.target
