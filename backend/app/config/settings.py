@@ -1,4 +1,11 @@
 """Application settings loaded from environment variables."""
+"""Application settings loaded from environment variables.
+
+Secure-by-default:
+- Debug is disabled.
+- CORS is explicit.
+- Secrets must be provided via environment variables.
+"""
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +38,7 @@ class Settings(BaseSettings):
 
     secure_cookies: bool = Field(default=False)
     rate_limit_per_minute: int = Field(default=120)
+    jwt_expiry_minutes: int = Field(default=30)
 
 
 settings = Settings()

@@ -18,6 +18,20 @@ function App() {
           <button onClick={() => setTab('risk')} className="rounded bg-slate-800 px-3 py-2">Risk</button>
         </div>
         {tab === 'leaderboard' ? <LeaderboardDashboard /> : tab === 'risk' ? <RiskDashboard /> : <ChallengeAdmin />}
+        </div>
+        {tab === 'leaderboard' ? <LeaderboardDashboard /> : <ChallengeAdmin />}
+import { AppLayout } from './layouts/AppLayout'
+import { ChallengeAdmin } from './pages/ChallengeAdmin'
+import { ThemeProvider } from './providers/ThemeProvider'
+import { ThemeProvider } from './providers/ThemeProvider'
+import { Dashboard } from './pages/Dashboard'
+
+function App() {
+  return (
+    <ThemeProvider>
+      <AppLayout>
+        <ChallengeAdmin />
+        <Dashboard />
       </AppLayout>
     </ThemeProvider>
   )

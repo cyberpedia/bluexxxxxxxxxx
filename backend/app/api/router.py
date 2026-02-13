@@ -4,6 +4,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket
 from pydantic import BaseModel, EmailStr, Field, constr
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, EmailStr, Field, constr
+import secrets
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, EmailStr
 
 from app.config.settings import settings
 from app.security.jwt import create_access_token, create_refresh_token, decode_token
@@ -37,6 +44,8 @@ from app.services.leaderboard import (
 )
 from app.services.realtime import connect, disconnect, fire_and_forget, publish_first_blood, publish_solve_event, recent_feed, record_solve_event
 from app.services.risk_engine import ip_cluster_findings, suspicious_report, team_risk, user_risk
+from app.services.store import AccountState, APIKeyRecord, SessionRecord, TeamRecord, store
+from fastapi import APIRouter
 
 api_router = APIRouter()
 
@@ -44,6 +53,7 @@ api_router = APIRouter()
 class RegisterIn(BaseModel):
     email: EmailStr
     username: constr(min_length=3, max_length=64)
+    username: str
     password: str
 
 
@@ -62,6 +72,8 @@ class EmailVerifyIn(BaseModel):
 class TeamCreateIn(BaseModel):
     event_id: constr(min_length=1, max_length=100)
     name: constr(min_length=2, max_length=120)
+    event_id: str
+    name: str
     invite_approval: bool = True
 
 
@@ -508,6 +520,7 @@ def get_hints(challenge_id: str, user=Depends(get_current_user)):
 
 @api_router.post('/challenges/{challenge_id}/submit')
 def submit_flag(challenge_id: str, payload: SubmitIn, request: Request, user=Depends(get_current_user)):
+def submit_flag(challenge_id: str, payload: SubmitIn, user=Depends(get_current_user)):
     challenge = store.challenges.get(challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail='Challenge not found')
@@ -540,6 +553,7 @@ def submit_flag(challenge_id: str, payload: SubmitIn, request: Request, user=Dep
     fire_and_forget(publish_solve_event(challenge_id, user.id, points))
     if first_blood:
         fire_and_forget(publish_first_blood(challenge_id, user.id))
+    store.audit(user.id, 'challenge.solved', {'challenge_id': challenge_id, 'points': points})
     return {'correct': True, 'points': points}
 
 
@@ -810,4 +824,12 @@ def risk_report(admin=Depends(get_current_user)):
 
 @api_router.get('/status', tags=['system'])
 def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status_route() -> dict[str, str]:
+@api_router.get('/status', tags=['system'])
+def status() -> dict[str, str]:
     return {'service': 'cerberus', 'state': 'ready'}
